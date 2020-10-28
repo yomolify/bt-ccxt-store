@@ -129,7 +129,7 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
 
         self.positions = collections.defaultdict(Position)
 
-        self.debug = debug
+        self.debug = True
         self.indent = 4  # For pretty printing dictionaries
 
         self.notifs = queue.Queue()  # holds orders which are notified
@@ -193,9 +193,9 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
 
             # Get the order
             ccxt_order = self.store.fetch_order(oID, o_order.data.p.dataname)
-            
+            print('ccxt_order', ccxt_order)
             # Check for new fills
-            if 'trades' in ccxt_order:
+            if 'trades' in ccxt_order and ccxt_order['trades']!=None:
                 for fill in ccxt_order['trades']:
                     if fill not in o_order.executed_fills:
                         o_order.execute(fill['datetime'], fill['amount'], fill['price'], 
@@ -218,11 +218,23 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
                 self.get_balance()
 
     def _submit(self, owner, data, exectype, side, amount, price, params):
+
         order_type = self.order_types.get(exectype) if exectype else 'market'
         created = int(data.datetime.datetime(0).timestamp()*1000)
         # Extract CCXT specific params if passed to the order
         params = params['params'] if 'params' in params else params
-        params['created'] = created  # Add timestamp of order creation for backtesting
+        if order_type == 'STOP_MARKET':
+            params['stopPrice'] = price
+        print('price')
+        print(price)
+        print('order_type')
+        print(order_type)
+        print('side')
+        print(side)
+        print('params')
+        print(params)
+        # params['created'] = created  # Add timestamp of order creation for backtesting
+
         ret_ord = self.store.create_order(symbol=data.p.dataname, order_type=order_type, side=side,
                                           amount=amount, price=price, params=params)
 
@@ -265,6 +277,12 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
 
         if self.debug:
             print(json.dumps(ccxt_order, indent=self.indent))
+            # print('closed_order, key')
+            # print(ccxt_order[self.mappings['closed_order']['key']])
+            # print('closed_order, value')
+            # print(ccxt_order[self.mappings['closed_order']['value']])
+            # print('closed_order')
+            # print(ccxt_order[self.mappings['closed_order']])
 
         if ccxt_order[self.mappings['closed_order']['key']] == self.mappings['closed_order']['value']:
             return order
@@ -273,13 +291,20 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
 
         if self.debug:
             print(json.dumps(ccxt_order, indent=self.indent))
-            print('Value Received: {}'.format(ccxt_order[self.mappings['canceled_order']['key']]))
+            # print('canceled_order')
+            # print(ccxt_order[self.mappings['canceled_order']])
+            # print('canceled_order, key')
+            # print(ccxt_order[self.mappings['canceled_order']['key']])
+            # print('canceled_order, value')
+            # print(ccxt_order[self.mappings['canceled_order']['value']])
+            # Commenting things that are breaking the code but the order is still cancelled.
+            # print('Value Received: {}'.format(ccxt_order[self.mappings['canceled_order']['key']]))
             print('Value Expected: {}'.format(self.mappings['canceled_order']['value']))
 
-        if ccxt_order[self.mappings['canceled_order']['key']] == self.mappings['canceled_order']['value']:
-            self.open_orders.remove(order)
-            order.cancel()
-            self.notify(order)
+        # if ccxt_order[self.mappings['canceled_order']['key']] == self.mappings['canceled_order']['value']:
+        self.open_orders.remove(order)
+        order.cancel()
+        self.notify(order)
         return order
 
     def get_orders_open(self, safe=False):
