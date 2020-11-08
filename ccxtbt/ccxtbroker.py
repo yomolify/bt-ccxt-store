@@ -147,8 +147,14 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
 
     def get_wallet_balance(self, currency, params={}):
         balance = self.store.get_wallet_balance(currency, params=params)
-        cash = balance['free'][currency] if balance['free'][currency] else 0
-        value = balance['total'][currency] if balance['total'][currency] else 0
+        try:
+            cash = balance['free'][currency] if balance['free'][currency] else 0
+        except KeyError:  # never funded or eg. all USD exchanged
+            cash = 0
+        try:
+            value = balance['total'][currency] if balance['total'][currency] else 0
+        except KeyError:  # never funded or eg. all USD exchanged
+            value = 0
         return cash, value
 
     def getcash(self):
@@ -217,14 +223,19 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
                 self.open_orders.remove(o_order)
                 self.get_balance()
 
-    def _submit(self, owner, data, exectype, side, amount, price, params):
+    def _submit(self, owner, data, execType, side, amount, price, params):
 
-        order_type = self.order_types.get(exectype) if exectype else 'market'
+        order_type = self.order_types.get(execType) if execType else 'market'
         created = int(data.datetime.datetime(0).timestamp()*1000)
         # Extract CCXT specific params if passed to the order
         params = params['params'] if 'params' in params else params
         if order_type == 'STOP_MARKET':
             params['stopPrice'] = price
+        # Binance doesn't want price for market orders
+        if order_type == 'market':
+            price = None
+        print('amount')
+        print(amount)
         print('price')
         print(price)
         print('order_type')
@@ -248,20 +259,20 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
         return order
 
     def buy(self, owner, data, size, price=None, plimit=None,
-            exectype=None, valid=None, tradeid=0, oco=None,
+            execType=None, valid=None, tradeid=0, oco=None,
             trailamount=None, trailpercent=None,
             **kwargs):
         del kwargs['parent']
         del kwargs['transmit']
-        return self._submit(owner, data, exectype, 'buy', size, price, kwargs)
+        return self._submit(owner, data, execType, 'buy', size, price, kwargs)
 
     def sell(self, owner, data, size, price=None, plimit=None,
-             exectype=None, valid=None, tradeid=0, oco=None,
+             execType=None, valid=None, tradeid=0, oco=None,
              trailamount=None, trailpercent=None,
              **kwargs):
         del kwargs['parent']
         del kwargs['transmit']
-        return self._submit(owner, data, exectype, 'sell', size, price, kwargs)
+        return self._submit(owner, data, execType, 'sell', size, price, kwargs)
 
     def cancel(self, order):
 
