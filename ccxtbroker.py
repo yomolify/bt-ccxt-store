@@ -191,6 +191,7 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
                 self.notify(o_order)
                 self.open_orders.remove(o_order)
                 self.get_balance()
+                # print(self.open_orders)
         except Exception as e:
             print("ERROR: {}".format(sys.exc_info()[0]))
             print("{}".format(e))
@@ -299,20 +300,25 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
         # params['created'] = created  # Add timestamp of order creation for backtesting
         # print(datetime.now())
         to_return_orders = []
+        try:
+            returned_orders, owner_data_list = self.store.create_batch_order(orders)
+            for returned_order in returned_orders:
+                _order = self.store.fetch_order(returned_order['orderId'], returned_order['symbol'].split('USDT')[0] + '/USDT')
+                for owner_data in owner_data_list:
+                    if returned_order['symbol'] == owner_data['symbol']:
+                        owner = owner_data['owner']
+                        data = owner_data['data']
+                        order = CCXTOrder(owner, data, _order)
+                        to_return_orders.append(order)
+                        order.price = returned_order['price']
+                        self.open_orders.append(order)
+                        self.notify(order)
+            return to_return_orders
+        except Exception as e:
+            print("ERROR: {}".format(sys.exc_info()[0]))
+            print("{}".format(e))
 
-        returned_orders, owner_data_list = self.store.create_batch_order(orders)
-        for returned_order in returned_orders:
-            _order = self.store.fetch_order(returned_order['orderId'], returned_order['symbol'].split('USDT')[0] + '/USDT')
-            for owner_data in owner_data_list:
-                if returned_order['symbol'] == owner_data['symbol']:
-                    owner = owner_data['owner']
-                    data = owner_data['data']
-                    order = CCXTOrder(owner, data, _order)
-                    to_return_orders.append(order)
-                    order.price = returned_order['price']
-                    self.open_orders.append(order)
-                    self.notify(order)
-        return to_return_orders
+
         # print(ret_ord)
         # [{'orderId': 10260663906, 'symbol': 'BTCUSDT', 'status': 'NEW', 'clientOrderId': 'iWm3n8yYouGS5tAxzvpmIB0',
         #   'price': '9511.51', 'avgPrice': '0.00000', 'origQty': '0.004', 'executedQty': '0', 'cumQty': '0',
