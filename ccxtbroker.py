@@ -30,17 +30,11 @@ from backtrader.utils.py3 import queue, with_metaclass
 
 from .ccxtstore import CCXTStore
 from datetime import datetime
-
-
-class MyThread(Thread):
-    def __init__(self, event):
-        Thread.__init__(self)
-        self.stopped = event
-
-    def run(self):
-        while not self.stopped.wait(0.5):
-            print("my thread")
-            # call a function
+from threading import Thread, Event
+import time
+# from multiprocessing.pool import ThreadPool as Pool
+import sys
+import datetime as dt
 
 
 class CCXTOrder(OrderBase):
@@ -51,7 +45,6 @@ class CCXTOrder(OrderBase):
         self.executed_fills = []
         self.ordtype = self.Buy if ccxt_order['side'] == 'buy' else self.Sell
         self.size = float(ccxt_order['amount'])
-
 
         super(CCXTOrder, self).__init__()
 
@@ -152,6 +145,70 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
         self.startingcash = self.store._cash
         self.startingvalue = self.store._value
 
+        t_order_updates = Thread(target=self.fetch_order_updates, daemon=True)
+        t_order_updates.start()
+
+    def _fetch_order_updates(self, o_order):
+        # TODO - Remove cancelled order from array
+        # TODO - Kill this thread after run
+        try:
+            oID = o_order.ccxt_order['id']
+
+            # Print debug before fetching so we know which order is giving an
+            # issue if it crashes
+            if self.debug:
+                print('Fetching Order ID: {}'.format(oID))
+
+            # Get the order
+            ccxt_order = self.store.fetch_order(oID, o_order.data.p.dataname)
+            print('ccxt_order - ', ccxt_order)
+            # Check for new fills
+            if 'trades' in ccxt_order and ccxt_order['trades'] != None:
+                for fill in ccxt_order['trades']:
+                    if fill not in o_order.executed_fills:
+                        o_order.execute(fill['datetime'], fill['amount'], fill['price'],
+                                        0, 0.0, 0.0,
+                                        0, 0.0, 0.0,
+                                        0.0, 0.0,
+                                        0, 0.0)
+                        o_order.executed_fills.append(fill['id'])
+
+            if self.debug:
+                print(json.dumps(ccxt_order, indent=self.indent))
+
+            # Check if the order is closed
+            if ccxt_order[self.mappings['closed_order']['key']] == self.mappings['closed_order']['value']:
+                pos = self.getposition(o_order.data, clone=False)
+                pos.update(o_order.size, o_order.price)
+                o_order.completed()
+                self.notify(o_order)
+                self.open_orders.remove(o_order)
+                self.get_balance()
+            if ccxt_order[self.mappings['canceled_order']['key']] == self.mappings['canceled_order']['value']:
+                pos = self.getposition(o_order.data, clone=False)
+                pos.update(o_order.size, o_order.price)
+                o_order.cancel()
+                self.notify(o_order)
+                self.open_orders.remove(o_order)
+                self.get_balance()
+        except Exception as e:
+            print("ERROR: {}".format(sys.exc_info()[0]))
+            print("{}".format(e))
+
+        return o_order
+
+    def fetch_order_updates(self):
+        # Make individual calls to each fetch open order, parellel
+        # Run once every 30 seconds
+        while (True):
+            if dt.datetime.now().second / 30 == 1:
+                if len(self.open_orders) > 0:
+                    for open_order in list(self.open_orders):
+                        t_fetch_order_updates = Thread(target=self._fetch_order_updates, args=[open_order])
+                        t_fetch_order_updates.start()
+                # So that it doesn't run a lot within that 1 second
+                time.sleep(2)
+
     def get_balance(self):
         self.store.get_balance()
         self.cash = self.store._cash
@@ -202,39 +259,6 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
         if self.debug:
             print('Broker next() called')
         # Put this in a thread and call it once every 5 seconds
-        for o_order in list(self.open_orders):
-            oID = o_order.ccxt_order['id']
-
-            # Print debug before fetching so we know which order is giving an
-            # issue if it crashes
-            if self.debug:
-                print('Fetching Order ID: {}'.format(oID))
-
-            # Get the order
-            ccxt_order = self.store.fetch_order(oID, o_order.data.p.dataname)
-            # print('ccxt_order', ccxt_order)
-            # Check for new fills
-            if 'trades' in ccxt_order and ccxt_order['trades']!=None:
-                for fill in ccxt_order['trades']:
-                    if fill not in o_order.executed_fills:
-                        o_order.execute(fill['datetime'], fill['amount'], fill['price'], 
-                                        0, 0.0, 0.0, 
-                                        0, 0.0, 0.0, 
-                                        0.0, 0.0,
-                                        0, 0.0)
-                        o_order.executed_fills.append(fill['id'])
-
-            if self.debug:
-                print(json.dumps(ccxt_order, indent=self.indent))
-
-            # Check if the order is closed
-            if ccxt_order[self.mappings['closed_order']['key']] == self.mappings['closed_order']['value']:
-                pos = self.getposition(o_order.data, clone=False)
-                pos.update(o_order.size, o_order.price)
-                o_order.completed()
-                self.notify(o_order)
-                self.open_orders.remove(o_order)
-                self.get_balance()
 
     def _submit(self, owner, data, execType, side, amount, price, params):
 
@@ -275,7 +299,7 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
         # params['created'] = created  # Add timestamp of order creation for backtesting
         # print(datetime.now())
         to_return_orders = []
-        
+
         returned_orders, owner_data_list = self.store.create_batch_order(orders)
         for returned_order in returned_orders:
             _order = self.store.fetch_order(returned_order['orderId'], returned_order['symbol'].split('USDT')[0] + '/USDT')

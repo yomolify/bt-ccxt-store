@@ -232,6 +232,10 @@ class CCXTStore(with_metaclass(MetaSingleton, object)):
         return self.exchange.fetch_order(oid, symbol)
 
     @retry
+    def fetch_orders(self, symbol):
+        return self.exchange.fetch_orders(symbol)
+
+    @retry
     def fetch_open_orders(self):
         return self.exchange.fetchOpenOrders()
 
